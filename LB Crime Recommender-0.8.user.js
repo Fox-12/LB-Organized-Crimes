@@ -117,6 +117,31 @@
                     { name: 'engineer', min: 80, order: 2 }
                 ]
             }
+        },
+        'clinical precision': {
+            tiers: {
+                major: [
+                    { name: 'imitator', min: 75, weight: 43, order: 1 }
+                ],
+                core: [
+                    { name: 'cleaner', min: 50, weight: 21, order: 1 },
+                    { name: 'cat burglar', min: 50, weight: 19, order: 2 },
+                    { name: 'assassin', min: 50, weight: 16, order: 3 }
+                ]
+            }
+        },
+        'window of opportunity': {
+            tiers: {
+                major: [
+                    { name: 'looter 2', min: 80, weight: 26, order: 1 }
+                ],
+                core: [
+                    { name: 'looter 1', min: 70, weight: 23, order: 1 },
+                    { name: 'muscle 1', min: 60, weight: 21, order: 2 },
+                    { name: 'engineer', min: 40, weight: 15, order: 3 },
+                    { name: 'muscle 2', min: 40, weight: 14, order: 4 }
+                ]
+            }
         }
     };
 
@@ -161,7 +186,7 @@
             .${BADGE_CLASS} {
                 position: absolute;
                 top: -10px;
-                right: -10px;
+                left: -10px;
                 z-index: 50;
                 min-width: 28px;
                 height: 28px;
@@ -274,6 +299,7 @@
                 return {
                     tier: tierName,
                     min: match.min,
+                    weight: match.weight ?? 0,
                     order: match.order
                 };
             }
@@ -283,6 +309,7 @@
     }
 
     function getTierRank(tierName) {
+        if (tierName === 'major') return 4;
         if (tierName === 'carry') return 3;
         if (tierName === 'core') return 2;
         return 1;
@@ -307,6 +334,8 @@
     function getOverallCrimePriority(crimeName) {
         if (crimeName === 'break the bank') return 1000;
         if (crimeName === 'blast from the past') return 999;
+        if (crimeName === 'clinical precision') return 998;
+        if (crimeName === 'window of opportunity') return 997;
         return getCrimeLevel(crimeName);
     }
 
@@ -336,6 +365,7 @@
                         actual,
                         tier: roleMeta.tier,
                         min: roleMeta.min,
+                        weight: roleMeta.weight,
                         order: roleMeta.order
                     });
                 } else {
@@ -352,6 +382,7 @@
                         actual,
                         tier: 'fallback',
                         min: threshold ?? 0,
+                        weight: 0,
                         order: 1
                     });
                 } else {
@@ -387,10 +418,12 @@
     }
 
     function getHighestQualifiedTier(snapshot) {
+        const lax = 3;
         const qualifiedOpen = snapshot.openSlots.filter(slot =>
-            slot.actual != null && slot.actual >= slot.min
+            slot.actual != null && slot.actual >= Math.max(0, slot.min - lax)
         );
 
+        if (qualifiedOpen.some(slot => slot.tier === 'major')) return 'major';
         if (qualifiedOpen.some(slot => slot.tier === 'carry')) return 'carry';
         if (qualifiedOpen.some(slot => slot.tier === 'core')) return 'core';
         if (qualifiedOpen.some(slot => slot.tier === 'recon')) return 'recon';
@@ -402,18 +435,23 @@
     // ==================================================
     function buildCandidates(snapshot) {
         if (snapshot.isSpecial) {
+            const lax = 3;
             const highestQualifiedTier = getHighestQualifiedTier(snapshot);
             if (!highestQualifiedTier) return [];
 
-            if (snapshot.isEmptyCrime && highestQualifiedTier !== 'recon') {
+            const tiers = getTierData(snapshot.crimeName);
+            const hasReconTier = !!tiers?.recon;
+            if (snapshot.isEmptyCrime && hasReconTier && highestQualifiedTier !== 'recon') {
                 return [];
             }
 
-            const targetTier = snapshot.isEmptyCrime ? 'recon' : highestQualifiedTier;
+            const targetTier = snapshot.isEmptyCrime
+                ? (hasReconTier ? 'recon' : highestQualifiedTier)
+                : highestQualifiedTier;
 
             return snapshot.openSlots
                 .filter(slot => slot.tier === targetTier)
-                .filter(slot => slot.actual != null && slot.actual >= slot.min)
+                .filter(slot => slot.actual != null && slot.actual >= Math.max(0, slot.min - lax))
                 .map(slot => ({
                     card: snapshot.card,
                     slot: slot.slot,
@@ -425,6 +463,7 @@
                     roleName: slot.roleName,
                     actual: slot.actual,
                     min: slot.min,
+                    weight: slot.weight,
                     tier: slot.tier,
                     roleOrder: slot.order,
                     filledCoreCount: snapshot.filledCoreCount,
@@ -433,7 +472,7 @@
         }
 
         return snapshot.openSlots
-            .filter(slot => slot.actual != null && slot.actual >= slot.min)
+            .filter(slot => slot.actual != null && slot.actual >= Math.max(0, slot.min - 3))
             .map(slot => ({
                 card: snapshot.card,
                 slot: slot.slot,
@@ -445,6 +484,7 @@
                 roleName: slot.roleName,
                 actual: slot.actual,
                 min: slot.min,
+                weight: slot.weight,
                 tier: 'fallback',
                 roleOrder: 1,
                 filledCoreCount: 0,
@@ -483,6 +523,10 @@
 
             if (a.tier === 'core' && a.filledCoreCount !== b.filledCoreCount) {
                 return a.filledCoreCount - b.filledCoreCount;
+            }
+
+            if (a.weight !== b.weight) {
+                return b.weight - a.weight;
             }
 
             if (a.min !== b.min) {
